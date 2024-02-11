@@ -24,6 +24,6 @@ async def today_in_history(app: Ariadne, group: Group, message: MessageChain):
                 desc = re.sub(r"<.*?>","",desc)
                 message_list.append(f"{index}.{year} {title}\n{desc}")
                 index += 1
-            await app.send_group_message(group, MessageChain("\n".join(message_list)))
+            await app.send_group_message(group, MessageChain("\n\n".join(message_list)))
         else:
             await app.send_group_message(group, MessageChain("获取历史上的今天信息失败了QAQ"))
