@@ -7,8 +7,8 @@ import aiofiles
 from graia.ariadne.app import Ariadne
 from graia.ariadne.event.message import GroupMessage
 from graia.ariadne.message.chain import MessageChain
-from graia.ariadne.message.element import At,Image
-from graia.ariadne.model import Group,Member
+from graia.ariadne.message.element import At, Image, Quote, Source
+from graia.ariadne.model import Group, Member
 from graia.saya import Channel
 from graia.saya.builtins.broadcast.schema import ListenerSchema
 
@@ -22,7 +22,8 @@ params = {
 haozai_model_loading = [
     {
         "role": "user",
-        "parts": {"text": "请记住，你现在是一个全知的神，你的名字是梦梦，你的主人名字叫做“Haozai”，但是你还是由Google开发训练的Gemini模型"}
+        "parts": {
+            "text": "请记住，你现在是一个全知的神，你的名字是梦梦，你的主人名字叫做“Haozai”，但是你还是由Google开发训练的Gemini模型"}
     },
     {
         'parts': [{'text': """好的，我会记住。
@@ -35,27 +36,38 @@ reply_lock = asyncio.Lock()
 pic_lock = asyncio.Lock()
 
 channel = Channel.current()
+
+
 @channel.use(ListenerSchema(listening_events=[GroupMessage]))
-async def haozai_chat(app: Ariadne, group: Group, message: MessageChain, member: Member):
+async def haozai_chat(app: Ariadne, group: Group, message: MessageChain, member: Member, quote: Quote | None, source:Source):
     if At(app.account) in message:
-        members_chat_history[str(member.id)] = None
         imgs = message[Image]
+        if quote:
+            # 这里不能直接origin获取原来消息链，不然只有Plain文本
+            # 通过id获取原消息链
+            source.id = quote.id
+            origin = await source.fetch_original()
+            imgs += origin[Image]
+            print("[INFO]:引用消息中包含图片| ",origin[Image])
+
+        members_chat_history[str(member.id)] = None
         has_pic = True if imgs else False
         img_paths = []
         for img in imgs:
             each_url = img.url
             each_id = img.id
-            print("[INFO]:图片信息| ",each_url,each_id)
+            print("[INFO]:图片信息| ", each_url, each_id)
             img_paths.append(f"modules\\pics\\{each_id}")
             async with pic_lock:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(each_url) as response:
-                        async with aiofiles.open(f"modules\\pics\\{each_id}","wb") as f:
+                        async with aiofiles.open(f"modules\\pics\\{each_id}", "wb") as f:
                             await f.write(await response.read())
         message = str(message.replace(At(app.account), '')).strip()
         async with aiohttp.ClientSession(trust_env=True) as session:
-            reply = await gemini_chat(session, message, str(member.id),img_paths=img_paths,has_pic=has_pic)
-        await app.send_group_message(group, MessageChain(At(member.id), " ",reply))
+            reply = await gemini_chat(session, message, str(member.id), img_paths=img_paths, has_pic=has_pic)
+        await app.send_group_message(group, MessageChain(At(member.id), " ", reply))
+
 
 async def gemini_chat(session, text, member_id, has_pic=False, img_paths=None):
     async with reply_lock:
@@ -74,17 +86,17 @@ async def gemini_chat(session, text, member_id, has_pic=False, img_paths=None):
                     async with aiofiles.open(img_path, 'rb') as pic:
                         base64_content = base64.b64encode(await pic.read()).decode('utf-8')
                     parts.append({
-                                    "inline_data": {
-                                        "mime_type": "image/jpeg",
-                                        "data": base64_content
-                                    }
-                                })
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64_content
+                        }
+                    })
         contents = [
-                {
-                    "role": "user",
-                    "parts": parts
-                }
-            ]
+            {
+                "role": "user",
+                "parts": parts
+            }
+        ]
         chat_history.append(contents[0])
         data = {"contents": contents} if has_pic else {"contents": chat_history}
         try:
@@ -97,7 +109,7 @@ async def gemini_chat(session, text, member_id, has_pic=False, img_paths=None):
                     print(reply)
                     return reply
         except Exception as e:
-            print("[WARNING]:出现错误|",e)
+            print("[WARNING]:出现错误|", e)
             await gemini_chat(session, text, member_id, has_pic=has_pic, img_paths=img_paths)
 
 
@@ -107,9 +119,9 @@ if __name__ == '__main__':
             async with aiohttp.ClientSession(trust_env=True) as session:
                 await gemini_chat(session, input("Input your question: "), "test_id")
 
+
     asyncio.run(main())
     # TODO 涩图api处理逻辑
     # TODO 超出对话TOKEN处理
     # TODO AI 绘画功能
     # TODO 超过每分钟对话频率限制
-
